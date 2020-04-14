@@ -109,10 +109,23 @@ export class DartDebugSession extends DebugSession {
 		this.threadManager = new ThreadManager(this.logger, this);
 	}
 
+	private logRequest(name: string, args: unknown) {
+		this.log(`DAP-REQ: ${name}: ${JSON.stringify(args)}`);
+	}
+
+	private logResponse(resp: DebugProtocol.Response) {
+		this.log(`DAP-RESP: ${JSON.stringify(resp)}`);
+	}
+
+	private logEvent(evt: DebugProtocol.Event) {
+		this.log(`DAP-EVT: ${JSON.stringify(evt)}`);
+	}
+
 	protected initializeRequest(
 		response: DebugProtocol.InitializeResponse,
 		args: DebugProtocol.InitializeRequestArguments,
 	): void {
+		this.logRequest("initializeRequest", args);
 		this.supportsRunInTerminalRequest = !!args.supportsRunInTerminalRequest;
 
 		response.body = response.body || {};
@@ -128,12 +141,15 @@ export class DartDebugSession extends DebugSession {
 			{ filter: "All", label: "All Exceptions", default: false },
 			{ filter: "Unhandled", label: "Uncaught Exceptions", default: true },
 		];
+		this.logResponse(response);
 		this.sendResponse(response);
 	}
 
 	protected async launchRequest(response: DebugProtocol.LaunchResponse, args: DartLaunchRequestArguments): Promise<void> {
+		this.logRequest("launchRequest", args);
 		if (!args || !args.dartPath || (this.requiresProgram && !args.program)) {
 			this.logToUser("Unable to restart debugging. Please try ending the debug session and starting again.\n");
+			this.logEvent(new TerminatedEvent());
 			this.sendEvent(new TerminatedEvent());
 			return;
 		}
@@ -161,6 +177,7 @@ export class DartDebugSession extends DebugSession {
 		this.supportsDebugInternalLibraries = this.dartCapabilities.supportsDebugInternalLibraries;
 		this.readSharedArgs(args);
 
+		this.logResponse(response);
 		this.sendResponse(response);
 
 		if (this.useWriteServiceInfo) {
@@ -214,7 +231,7 @@ export class DartDebugSession extends DebugSession {
 					await this.raceIgnoringErrors(() => this.lastLoggingEvent, 500);
 					// Add a small delay to allow for async events to complete first
 					// to reduce the chance of closing output.
-					setTimeout(() => this.sendEvent(new TerminatedEvent()), 250);
+					setTimeout(() => { this.logEvent(new TerminatedEvent()); this.sendEvent(new TerminatedEvent()); }, 250);
 				});
 			}
 
@@ -224,12 +241,14 @@ export class DartDebugSession extends DebugSession {
 			}
 		} catch (e) {
 			this.logToUser(`Unable to start debugging: ${e}`);
+			this.logEvent(new TerminatedEvent());
 			this.sendEvent(new TerminatedEvent());
 			return;
 		}
 
 		if (!this.shouldConnectDebugger) {
 			this.endProgress(debugLaunchProgressId);
+			this.logEvent(new InitializedEvent());
 			this.sendEvent(new InitializedEvent());
 
 			// If we're not connecting a debugger and we spawned a remote process, we have
@@ -255,6 +274,7 @@ export class DartDebugSession extends DebugSession {
 	}
 
 	protected async attachRequest(response: DebugProtocol.AttachResponse, args: DartAttachRequestArguments): Promise<void> {
+		this.logRequest("attachRequest", args);
 		const vmServiceUri = (args.vmServiceUri || args.observatoryUri);
 		if (!args || (!vmServiceUri && !args.serviceInfoFile)) {
 			return this.errorResponse(response, "Unable to attach; no VM service address or service info file provided.");
@@ -282,6 +302,7 @@ export class DartDebugSession extends DebugSession {
 			}
 		}
 
+		this.logResponse(response);
 		this.sendResponse(response);
 
 		let url: string | undefined;
@@ -485,11 +506,13 @@ export class DartDebugSession extends DebugSession {
 			browserFriendlyUri = uri;
 		}
 
-		this.sendEvent(new Event("dart.debuggerUris", {
+		const evt = new Event("dart.debuggerUris", {
 			// If we don't support Observatory, don't send its URL back to the editor.
 			observatoryUri: this.supportsObservatoryWebApp ? browserFriendlyUri.toString() : undefined,
 			vmServiceUri: browserFriendlyUri.toString(),
-		}));
+		});
+		this.logEvent(evt);
+		this.sendEvent(evt);
 
 		if (!this.shouldConnectDebugger)
 			return;
@@ -571,6 +594,7 @@ export class DartDebugSession extends DebugSession {
 							setTimeout(() => this.pollForMemoryUsage(), this.pollforMemoryMs);
 
 						this.endProgress(debugLaunchProgressId);
+						this.logEvent(new InitializedEvent());
 						this.sendEvent(new InitializedEvent());
 					});
 				});
@@ -591,6 +615,7 @@ export class DartDebugSession extends DebugSession {
 				// If we don't have a process (eg. we're attached) or we ran as a terminal, then this is our signal to quit,
 				// since we won't get a process exit event.
 				if (!this.childProcess || this.childProcess instanceof RemoteEditorTerminalProcess) {
+					this.logEvent(new TerminatedEvent());
 					this.sendEvent(new TerminatedEvent());
 				} else {
 					// In some cases the VM service closes but we never get the exit/close events from the process
@@ -601,8 +626,10 @@ export class DartDebugSession extends DebugSession {
 					// this code results in a TerminatedEvent() even though the process hasn't quit. The TerminatedEvent()
 					// results in VS Code sending disconnectRequest() and we then try to more forefully kill.
 					setTimeout(() => {
-						if (!this.processExited)
+						if (!this.processExited) {
+							this.logEvent(new TerminatedEvent());
 							this.sendEvent(new TerminatedEvent());
+						}
 					}, 5000);
 				}
 			});
@@ -738,6 +765,7 @@ export class DartDebugSession extends DebugSession {
 		response: DebugProtocol.TerminateResponse,
 		args: DebugProtocol.TerminateArguments,
 	): Promise<void> {
+		this.logRequest("teminateRequest", args);
 		this.log(`Termination requested!`);
 		this.isTerminating = true;
 		this.startProgress(debugTerminatingProgressId, "Terminating debug session");
@@ -769,6 +797,7 @@ export class DartDebugSession extends DebugSession {
 		response: DebugProtocol.DisconnectResponse,
 		args: DebugProtocol.DisconnectArguments,
 	): Promise<void> {
+		this.logRequest("disconnectRequest", args);
 		this.log(`Disconnect requested!`);
 		this.isTerminating = true;
 		try {
@@ -786,8 +815,10 @@ export class DartDebugSession extends DebugSession {
 		response: DebugProtocol.SetBreakpointsResponse,
 		args: DebugProtocol.SetBreakpointsArguments,
 	): Promise<void> {
+		this.logRequest("setBreakPointsRequest", args);
 		if (this.noDebug) {
 			response.body = { breakpoints: (args.breakpoints || []).map((b) => ({ verified: false })) };
+			this.logResponse(response);
 			this.sendResponse(response);
 			return;
 		}
@@ -812,6 +843,7 @@ export class DartDebugSession extends DebugSession {
 			}
 
 			response.body = { breakpoints: bpResponse };
+			this.logResponse(response);
 			this.sendResponse(response);
 		} catch (error) {
 			this.errorResponse(response, `${error}`);
@@ -822,6 +854,7 @@ export class DartDebugSession extends DebugSession {
 		response: DebugProtocol.SetExceptionBreakpointsResponse,
 		args: DebugProtocol.SetExceptionBreakpointsArguments,
 	): Promise<void> {
+		this.logRequest("setExceptionBreakPointsRequest", args);
 		const filters: string[] = args.filters;
 
 		let mode: VmExceptionMode = "None";
@@ -836,6 +869,7 @@ export class DartDebugSession extends DebugSession {
 
 		await this.threadManager.setExceptionPauseMode(mode);
 
+		this.logResponse(response);
 		this.sendResponse(response);
 	}
 
@@ -843,12 +877,15 @@ export class DartDebugSession extends DebugSession {
 		response: DebugProtocol.ConfigurationDoneResponse,
 		args: DebugProtocol.ConfigurationDoneArguments,
 	): void {
+		this.logRequest("configurationDoneRequest", args);
+		this.logResponse(response);
 		this.sendResponse(response);
 
 		this.threadManager.receivedConfigurationDone();
 	}
 
 	protected pauseRequest(response: DebugProtocol.PauseResponse, args: DebugProtocol.PauseArguments): void {
+		this.logRequest("pauseRequest", args);
 		const thread = this.threadManager.getThreadInfoFromNumber(args.threadId);
 
 		if (!thread) {
@@ -862,11 +899,12 @@ export class DartDebugSession extends DebugSession {
 		}
 
 		this.vmService.pause(thread.ref.id)
-			.then((_) => this.sendResponse(response))
+			.then((_) => { this.logResponse(response); this.sendResponse(response); })
 			.catch((error) => this.errorResponse(response, `${error}`));
 	}
 
 	protected sourceRequest(response: DebugProtocol.SourceResponse, args: DebugProtocol.SourceArguments): void {
+		this.logRequest("sourceRequest", args);
 		const sourceReference = args.sourceReference;
 		const data = this.threadManager.getStoredData(sourceReference);
 		const scriptRef: VMScriptRef = data.data as VMScriptRef;
@@ -878,16 +916,20 @@ export class DartDebugSession extends DebugSession {
 				response.success = false;
 				response.message = "<source not available>";
 			}
+			this.logResponse(response);
 			this.sendResponse(response);
 		}).catch((error) => this.errorResponse(response, `${error}`));
 	}
 
 	protected threadsRequest(response: DebugProtocol.ThreadsResponse): void {
+		this.logRequest("threadsRequest", undefined);
 		response.body = { threads: this.threadManager.getThreads() };
+		this.logResponse(response);
 		this.sendResponse(response);
 	}
 
 	protected stackTraceRequest(response: DebugProtocol.StackTraceResponse, args: DebugProtocol.StackTraceArguments): void {
+		this.logRequest("stackTraceRequest", args);
 		const thread = this.threadManager.getThreadInfoFromNumber(args.threadId);
 		const startFrame = args.startFrame || 0;
 		let levels = args.levels;
@@ -997,14 +1039,17 @@ export class DartDebugSession extends DebugSession {
 			};
 
 			Promise.all(promises).then((_) => {
+				this.logResponse(response);
 				this.sendResponse(response);
 			}).catch((_) => {
+				this.logResponse(response);
 				this.sendResponse(response);
 			});
 		}).catch((error) => this.errorResponse(response, `${error}`));
 	}
 
 	protected scopesRequest(response: DebugProtocol.ScopesResponse, args: DebugProtocol.ScopesArguments): void {
+		this.logRequest("scopesRequest", args);
 		const frameId = args.frameId;
 		const data = this.threadManager.getStoredData(frameId);
 		const frame: VMFrame = data.data as VMFrame;
@@ -1021,10 +1066,12 @@ export class DartDebugSession extends DebugSession {
 		scopes.push(new Scope("Locals", variablesReference));
 
 		response.body = { scopes };
+		this.logResponse(response);
 		this.sendResponse(response);
 	}
 
 	protected async variablesRequest(response: DebugProtocol.VariablesResponse, args: DebugProtocol.VariablesArguments): Promise<void> {
+		this.logRequest("variablesRequest", args);
 		if (!this.vmService) {
 			this.errorResponse(response, `No VM service connection`);
 			return;
@@ -1051,6 +1098,7 @@ export class DartDebugSession extends DebugSession {
 				variables = variables.concat(frameVariables);
 			}
 			response.body = { variables };
+			this.logResponse(response);
 			this.sendResponse(response);
 		} else if (data.data.type === "MapEntry") {
 			const mapRef = data.data as VMMapEntry;
@@ -1085,6 +1133,7 @@ export class DartDebugSession extends DebugSession {
 			}
 
 			response.body = { variables };
+			this.logResponse(response);
 			this.sendResponse(response);
 		} else if (data.data.type === InspectedVariable.type) {
 			const variable = data.data as InspectedVariable;
@@ -1203,6 +1252,7 @@ export class DartDebugSession extends DebugSession {
 				}
 
 				response.body = { variables };
+				this.logResponse(response);
 				this.sendResponse(response);
 			} catch (error) {
 				response.body = {
@@ -1210,6 +1260,7 @@ export class DartDebugSession extends DebugSession {
 						{ name: "<error>", value: this.errorAsDisplayValue(error), variablesReference: 0 },
 					],
 				};
+				this.logResponse(response);
 				this.sendResponse(response);
 			}
 		}
@@ -1278,6 +1329,7 @@ export class DartDebugSession extends DebugSession {
 	}
 
 	protected setVariableRequest(response: DebugProtocol.SetVariableResponse, args: DebugProtocol.SetVariableArguments): void {
+		this.logRequest("setVariableRequest", args);
 		// const variablesReference: number = args.variablesReference;
 		// const name: string = args.name;
 		// const value: string = args.value;
@@ -1287,6 +1339,7 @@ export class DartDebugSession extends DebugSession {
 	}
 
 	protected continueRequest(response: DebugProtocol.ContinueResponse, args: DebugProtocol.ContinueArguments): void {
+		this.logRequest("continueRequest", args);
 		const thread = this.threadManager.getThreadInfoFromNumber(args.threadId);
 		if (!thread) {
 			this.errorResponse(response, `No thread with id ${args.threadId}`);
@@ -1294,11 +1347,13 @@ export class DartDebugSession extends DebugSession {
 		}
 		thread.resume().then((_) => {
 			response.body = { allThreadsContinued: false };
+			this.logResponse(response);
 			this.sendResponse(response);
 		}).catch((error) => this.errorResponse(response, `${error}`));
 	}
 
 	protected nextRequest(response: DebugProtocol.NextResponse, args: DebugProtocol.NextArguments): void {
+		this.logRequest("nextRequest", args);
 		const thread = this.threadManager.getThreadInfoFromNumber(args.threadId);
 		if (!thread) {
 			this.errorResponse(response, `No thread with id ${args.threadId}`);
@@ -1306,33 +1361,39 @@ export class DartDebugSession extends DebugSession {
 		}
 		const type = thread.atAsyncSuspension ? "OverAsyncSuspension" : "Over";
 		thread.resume(type).then((_) => {
+			this.logResponse(response);
 			this.sendResponse(response);
 		}).catch((error) => this.errorResponse(response, `${error}`));
 	}
 
 	protected stepInRequest(response: DebugProtocol.StepInResponse, args: DebugProtocol.StepInArguments): void {
+		this.logRequest("stepInRequest", args);
 		const thread = this.threadManager.getThreadInfoFromNumber(args.threadId);
 		if (!thread) {
 			this.errorResponse(response, `No thread with id ${args.threadId}`);
 			return;
 		}
 		thread.resume("Into").then((_) => {
+			this.logResponse(response);
 			this.sendResponse(response);
 		}).catch((error) => this.errorResponse(response, `${error}`));
 	}
 
 	protected stepOutRequest(response: DebugProtocol.StepOutResponse, args: DebugProtocol.StepOutArguments): void {
+		this.logRequest("stepOutRequest", args);
 		const thread = this.threadManager.getThreadInfoFromNumber(args.threadId);
 		if (!thread) {
 			this.errorResponse(response, `No thread with id ${args.threadId}`);
 			return;
 		}
 		thread.resume("Out").then((_) => {
+			this.logResponse(response);
 			this.sendResponse(response);
 		}).catch((error) => this.errorResponse(response, `${error}`));
 	}
 
 	protected restartFrameRequest(response: DebugProtocol.RestartFrameResponse, args: DebugProtocol.RestartFrameArguments): void {
+		this.logRequest("restartFrameRequest", args);
 		const frameId = args.frameId;
 		// const context: string = args.context; // "watch", "repl", "hover"
 
@@ -1346,16 +1407,19 @@ export class DartDebugSession extends DebugSession {
 		const frame: VMFrame = data.data as VMFrame;
 
 		thread.resume("Rewind", frame.index).then((_) => {
+			this.logResponse(response);
 			this.sendResponse(response);
 		}).catch((error) => this.errorResponse(response, `${error}`));
 	}
 
 	protected reverseContinueRequest(response: DebugProtocol.ReverseContinueResponse, args: DebugProtocol.ReverseContinueArguments): void {
+		this.logRequest("reverseContinueRequest", args);
 		this.logToUser("Reverse continue is not supported\n");
 		this.errorResponse(response, `Reverse continue is not supported for the Dart debugger`);
 	}
 
 	protected async evaluateRequest(response: DebugProtocol.EvaluateResponse, args: DebugProtocol.EvaluateArguments): Promise<void> {
+		this.logRequest("evaluateRequest", args);
 		const isClipboardContext = args.context === "clipboard";
 		const isWatchContext = args.context === "watch";
 		const expression: string = args.expression.replace(trailingSemicolonPattern, "");
@@ -1402,6 +1466,7 @@ export class DartDebugSession extends DebugSession {
 							result: await this.fullValueAsString(thread.ref, exceptionInstanceRef) || "<unknown>",
 							variablesReference: thread.exceptionReference,
 						};
+						this.logResponse(response);
 						this.sendResponse(response);
 						return;
 					}
@@ -1441,6 +1506,7 @@ export class DartDebugSession extends DebugSession {
 					result: text || "<unknown>",
 					variablesReference: this.isSimpleKind(instanceRef.kind) ? 0 : thread.storeData(instanceRef),
 				};
+				this.logResponse(response);
 				this.sendResponse(response);
 			}
 		} catch (e) {
@@ -1502,10 +1568,12 @@ export class DartDebugSession extends DebugSession {
 	}
 
 	protected async customRequest(request: string, response: DebugProtocol.Response, args: any): Promise<void> {
+		this.logRequest("customRequest", args);
 		try {
 			switch (request) {
 				case "service":
 					await this.callService(args.type, args.params);
+					this.logResponse(response);
 					this.sendResponse(response);
 					break;
 				case "exposeUrlResponse":
@@ -1517,6 +1585,7 @@ export class DartDebugSession extends DebugSession {
 					this.debugExternalLibraries = !!args.debugExternalLibraries;
 					this.debugSdkLibraries = !!args.debugSdkLibraries;
 					await this.threadManager.setLibrariesDuggableForAllIsolates();
+					this.logResponse(response);
 					this.sendResponse(response);
 					break;
 				// Flutter requests that may be sent during test runs or other places
@@ -1531,6 +1600,7 @@ export class DartDebugSession extends DebugSession {
 				case "hotRestart":
 					// TODO: Get rid of this!
 					this.log(`Ignoring Flutter customRequest ${request} for non-Flutter-run app`, LogSeverity.Warn);
+					this.logResponse(response);
 					this.sendResponse(response);
 					break;
 				default:
@@ -1731,6 +1801,7 @@ export class DartDebugSession extends DebugSession {
 
 			thread.handlePaused(event.atAsyncSuspension, event.exception);
 			if (shouldRemainedStoppedOnBreakpoint) {
+				this.logEvent(new StoppedEvent(reason, thread.num, exceptionText));
 				this.sendEvent(new StoppedEvent(reason, thread.num, exceptionText));
 			} else {
 				await thread.resume();
@@ -1825,16 +1896,19 @@ export class DartDebugSession extends DebugSession {
 	}
 
 	private notifyServiceExtensionAvailable(id: string, isolateId: string | undefined) {
+		this.logEvent(new Event("dart.serviceExtensionAdded", { id, isolateId }));
 		this.sendEvent(new Event("dart.serviceExtensionAdded", { id, isolateId }));
 	}
 
 	private notifyServiceRegistered(service: string, method: string | undefined) {
+		this.logEvent(new Event("dart.serviceRegistered", { service, method }));
 		this.sendEvent(new Event("dart.serviceRegistered", { service, method }));
 	}
 
 	public errorResponse(response: DebugProtocol.Response, message: string) {
 		response.success = false;
 		response.message = message;
+		this.logResponse(response);
 		this.sendResponse(response);
 	}
 
@@ -1993,6 +2067,7 @@ export class DartDebugSession extends DebugSession {
 			}
 		}
 
+		this.logEvent(new Event("dart.debugMetrics", { memory: { current, total } }));
 		this.sendEvent(new Event("dart.debugMetrics", { memory: { current, total } }));
 
 		if (this.pollforMemoryMs)
@@ -2107,6 +2182,7 @@ export class DartDebugSession extends DebugSession {
 			output.body.output = `${applyColor(output.body.output.trimRight(), grey)}\n`;
 		}
 
+		this.logEvent(output);
 		this.sendEvent(output);
 	}
 }
