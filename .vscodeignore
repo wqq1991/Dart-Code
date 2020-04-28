@@ -1,9 +1,10 @@
-.dart_code_test_logs/**
 .dart_code_test_data_dir/**
+.dart_code_test_logs/**
+.eslintrc.js
 .gitattributes
-.gitmodules
 .github/
 .gitignore
+.gitmodules
 .nyc_output/**
 .test_results/**
 .vscode-test/**
@@ -25,6 +26,5 @@ src/**
 tool/**
 tool/**
 tsconfig.json
-tslint.json
 typings/**
 webpack.config.js

@@ -16,7 +16,7 @@
 				"isDefault": true
 			},
 			"runOptions": {
-				"runOn": "folderOpen",
+				"runOn": "folderOpen"
 			}
 		},
 		{
@@ -31,8 +31,8 @@
 			},
 			"group": "build",
 			"runOptions": {
-				"runOn": "folderOpen",
+				"runOn": "folderOpen"
 			}
-		}
+		},
 	]
 }

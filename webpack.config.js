@@ -1,4 +1,4 @@
-//@ts-check
+// @ts-check
 
 "use strict";
 
@@ -17,9 +17,10 @@
 // It appears to be safe to ignore these as they're being loaded in a try{} block
 // and are optional.
 
-const path = require("path");
+import * as path from "path";
 
-module.exports = env => {
+// eslint-disable-next-line @typescript-eslint/explicit-function-return-type
+export default (env) => {
 	/**
 	 * @type {import("webpack").Configuration}
 	 */
